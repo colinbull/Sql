@@ -1,4 +1,4 @@
-#I "../packages/FParsec.1.0.1/lib/net40-client/"
+#I "packages/FParsec/lib/net40-client/"
 #r "FParsecCS.dll"
 #r "FParsec.dll"
 
@@ -75,18 +75,30 @@ module Sql =
 
         let keywords = [
             "SELECT"; "FROM"; "WHERE"; "JOIN"; "AS"; "GROUP"; "ORDER"; "HAVING"
-            "BY"; "INNER"; "OUTER"; "LEFT"; "RIGHT"; "FULL"; "CROSS"; "ON"; "ASC"; "DESC"
+            "BY"; "INNER"; "OUTER"; "LEFT"; "RIGHT"; "FULL"; "CROSS"; "ON"; "ASC"; "DESC";
+            "AND"; "OR"; "NOT"; "LIKE"
         ]
         
         let keywordSet = new HashSet<string>(keywords)
         let isKeyword (kw:string) = keywordSet.Contains(kw.ToUpper())
         
+        let keyword (kw:string) : Parser<string, unit> = 
+            fun stream ->
+                 let state = stream.State
+                 let reply = identifierString stream
+                 if reply.Status = Ok && (isKeyword reply.Result) //&& ((kw.ToUpper()) = input)
+                 then reply
+                 else 
+                    stream.BacktrackTo(state)
+                    Reply(Error, expected (sprintf "keyword: %s" kw))
+
         let identifier : Parser<string, unit> =
             let expectedIdentifier = expected "identifier"
             fun stream ->
                 let state = stream.State
                 let reply = identifierString stream
-                if reply.Status <> Ok || not (isKeyword reply.Result) then reply
+                if reply.Status = Ok && not (isKeyword reply.Result) 
+                then reply
                 else // result is keyword, so backtrack to before the string
                     stream.BacktrackTo(state)
                     Reply(Error, expectedIdentifier)
@@ -99,7 +111,7 @@ module Sql =
             (pint32 |>> Ast.Integer) <|> (pfloat |>> Ast.Float)
 
         let alias =
-            attempt (spaces >>. (identifier <|> (skipStringCI "AS" >>. spaces >>. quotedStr)))
+            attempt (spaces >>. ((quotedStr <|> identifier) <|> (skipStringCI "AS" >>. spaces >>. (quotedStr <|> identifier))))
         
         let reference =
             sepBy identifier (pchar '.')
@@ -133,30 +145,30 @@ module Sql =
             opp.AddOperator(InfixOperator("-", spaces, 3, Assoc.Left, (fun x y -> BinEx(BinOp.Sub, x, y))))
             opp.AddOperator(InfixOperator("%", spaces, 3, Assoc.Left, (fun x y -> BinEx(BinOp.Mod, x, y))))
            
-            opp.AddOperator(InfixOperator("=", spaces, 4, Assoc.Left, (fun x y -> BinEx(BinOp.Eq, x, y))))
-            opp.AddOperator(InfixOperator("<", spaces, 4, Assoc.Left, (fun x y -> BinEx(BinOp.Lt, x, y))))
-            opp.AddOperator(InfixOperator(">", spaces, 4, Assoc.Left, (fun x y -> BinEx(BinOp.Gt, x, y))))
+            opp.AddOperator(InfixOperator("=", spaces, 4, Assoc.Right, (fun x y -> BinEx(BinOp.Eq, x, y))))
+            opp.AddOperator(InfixOperator("<", spaces, 4, Assoc.None, (fun x y -> BinEx(BinOp.Lt, x, y))))
+            opp.AddOperator(InfixOperator(">", spaces, 4, Assoc.None, (fun x y -> BinEx(BinOp.Gt, x, y))))
             opp.AddOperator(InfixOperator("<=", spaces, 4, Assoc.Left, (fun x y -> BinEx(BinOp.Lte, x, y))))
             opp.AddOperator(InfixOperator(">=", spaces, 4, Assoc.Left, (fun x y -> BinEx(BinOp.Gte, x, y))))
 
-            opp.AddOperator(InfixOperator("AND", spaces, 5, Assoc.None, (fun x y -> And(x,y))))
-            opp.AddOperator(InfixOperator("OR", spaces, 6, Assoc.None, (fun x y -> Or(x,y))))
+            opp.AddOperator(InfixOperator("AND", spaces, 5, Assoc.Left, (fun x y -> And(x,y))))
+            opp.AddOperator(InfixOperator("OR", spaces, 6, Assoc.Left, (fun x y -> Or(x,y))))
             opp.AddOperator(PrefixOperator("NOT", spaces, 7, false, (fun x -> Not(x))))
             opp.AddOperator(PrefixOperator("LIKE", spaces, 7, false, (fun x -> UnEx(UnOp.Like, x))))
             
             expr
 
         let whereEx =
-            opt <| attempt (spaces .>> skipStringCI "WHERE" >>. spaces >>. termEx .>> spaces)
+            opt <| attempt (spaces .>> (keyword "WHERE") .>> spaces >>. termEx .>> spaces)
 
         let orderEx =
-            attempt (skipStringCI "ORDER BY" >>. spaces
+            attempt (keyword "ORDER" >>. spaces >>. keyword "BY" >>. spaces
                      >>. sepBy (spaces >>. reference .>>. (
                                                 attempt (
                                                       opt (
-                                                            (skipStringCI  "ASC") >>% OrderDir.ASC
+                                                            (keyword  "ASC") >>% OrderDir.ASC
                                                              <|>
-                                                            ((skipStringCI "DESC") >>% OrderDir.DESC)
+                                                            ((keyword "DESC") >>% OrderDir.DESC)
                                                       )
                                                   )
                                                )
@@ -169,25 +181,25 @@ module Sql =
                 spaces
                 >>. (attempt (opt
                         (choice [
-                                    pstringCI "LEFT" >>% JoinDir.Left
-                                    pstringCI "RIGHT" >>% JoinDir.Right
+                                    keyword "LEFT" >>% JoinDir.Left
+                                    keyword "RIGHT" >>% JoinDir.Right
                                 ])))
                 .>> spaces
             
             let joinType =
                 spaces >>. choice [
-                        pstringCI "JOIN" >>% JoinType.Inner
-                        pstringCI "INNER JOIN" >>% JoinType.Inner
-                        pstringCI "OUTER JOIN" >>% JoinType.Outer
-                        pstringCI "FULL JOIN" >>% JoinType.Full
-                        pstringCI "CROSS JOIN" >>% JoinType.Cross
+                        keyword "JOIN" >>% JoinType.Inner
+                        keyword "INNER" >>. spaces >>. keyword "JOIN" >>% JoinType.Inner
+                        keyword "OUTER" >>. spaces >>. keyword "JOIN" >>% JoinType.Outer
+                        keyword "FULL" >>. spaces >>. keyword "JOIN" >>% JoinType.Full
+                        keyword "CROSS" >>. spaces >>. keyword "JOIN" >>% JoinType.Cross
                 ] .>> spaces
 
             let joinClass =
                 spaces >>. (joinDir .>>. joinType) .>> spaces
             
             let join =
-                (joinClass .>>. ((reference .>>. (opt alias))  .>> spaces .>> skipStringCI "ON" .>> spaces .>>. termEx .>> spaces))
+                (joinClass .>>. ((reference .>>. (opt alias))  .>> spaces .>> keyword "ON" .>> spaces .>>. termEx .>> spaces))
                 |>> (fun (x,(y,z)) -> Join(x,y,z))
         
             attempt (manyTill join (notFollowedBy joinClass)) 
@@ -195,9 +207,9 @@ module Sql =
         
         let sqlParser =
             parse {
-                do! skipStringCI "SELECT" >>. spaces
+                do! keyword "SELECT" >>. spaces
                 let! projection =  sepBy (termEx .>>. (opt alias) |>> Projection) (pstring ",")
-                do! spaces >>. skipStringCI "FROM" >>. spaces
+                do! spaces >>. keyword "FROM" >>. spaces
                 let! from = (sepBy ((reference .>>. (opt alias)) |>> From) (pstring ","))
                 do! spaces
                 let! join = joinEx
@@ -218,10 +230,10 @@ module Sql =
 let test = """
 SELECT (3 + 2) * 6 as 'Value', tbl1.ID ID
 FROM dbo.Table1 tbl1
-JOIN dbo.Table2 tbl2 on Value = f.Value
+JOIN dbo.Table2 tbl2 ON Value = f.Value
 RIGHT OUTER JOIN dbo.Table3 tbl3 on tbl2.Value = tbl3.NotionalAmount
 LEFT OUTER JOIN dbo.Table4 tbl4 on tbl1.Value = tbl4.NotionalAmount
-WHERE (Value = 36) AND (ID > 2)
+WHERE (Value = 36)AND(ID > 2)OR(x + 1 > 3)
 ORDER BY Value ASC, ID
 """
 
