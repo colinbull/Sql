@@ -70,7 +70,7 @@ module Sql =
         open Ast
 
         let quote = skipStringCI "\"" <|> skipStringCI "'"
-        let identifierString = many1Satisfy (fun c -> isAsciiLetter c || isDigit c)
+        let identifierString = many1Satisfy (fun c -> not(System.Char.IsWhiteSpace c) && isNoneOf ['[';']'] c)
 
         let keywords = [
             "SELECT"; "FROM"; "WHERE"; "JOIN"; "AS"; "GROUP"; "ORDER"; "HAVING"
@@ -113,13 +113,13 @@ module Sql =
 
         let alias =
             spaces >>. (
-              (keyword "AS" >>. spaces >>. (quotedStr <|> identifier))
+              (keyword "AS" >>. spaces >>. (quotedStr <|> identifier <|> (between (str_ws "[") (str_ws "]") identifier)))
               <|>
               (quotedStr <|> identifier) 
             ) .>> spaces
         
         let reference =
-            sepBy identifier (pchar '.')
+            sepBy (identifier <|> (between (str_ws "[") (str_ws "]") identifier)) (pchar '.')
             |>> Ref
         
         type Assoc = Associativity
@@ -158,7 +158,6 @@ module Sql =
             opp.AddOperator(InfixOperator("AND", notFollowedBy letter >>. spaces, 1, Assoc.Left, (fun x y -> And(x,y))))
             opp.AddOperator(InfixOperator("OR", notFollowedBy letter >>. spaces, 1, Assoc.Left, (fun x y -> Or(x,y))))
 
-            
             expr
 
         let referenceEx = 
@@ -274,10 +273,12 @@ let test = """
 SELECT (3 + 2) * 6 as 'Value', tbl1.ID ID
 FROM dbo.Table1 tbl1
 JOIN dbo.Table2 tbl2 ON Value = f.Value
-RIGHT OUTER JOIN dbo.Table3 tbl3 on tbl2.Value = tbl3.NotionalAmount
+RIGHT OUTER JOIN [dbo].[Table3] tbl3 on tbl2.Value = tbl3.NotionalAmount
 LEFT OUTER JOIN dbo.Table4 tbl4 on tbl1.Value = tbl4.NotionalAmount
 WHERE ((Value = 36) AND (ID > 2)) OR ((x + 1) > 3)
 ORDER BY Value ASC
 """
 
 Sql.Parser.parse test
+
+FParsec.CharParsers.runParserOnFile Sql.Parser.sqlParser () @"C:\Appdev\sql\examples\example_1.sql" System.Text.Encoding.UTF8
