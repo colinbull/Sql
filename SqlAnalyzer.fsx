@@ -75,7 +75,7 @@ module Sql =
         let keywords = [
             "SELECT"; "FROM"; "WHERE"; "JOIN"; "AS"; "GROUP"; "ORDER"; "HAVING"
             "BY"; "INNER"; "OUTER"; "LEFT"; "RIGHT"; "FULL"; "CROSS"; "ON"; "ASC"; "DESC";
-            "AND"; "OR"; "NOT"; "LIKE"; "ORDER BY"
+            "AND"; "OR"; "NOT"; "LIKE"; "ORDER BY"; "DISTINCT"; "TOP"
         ]
         
         let str_ws s = pstring s .>> spaces
@@ -86,12 +86,7 @@ module Sql =
         
         let keyword (kw:string) : Parser<string, unit> = 
             pstringCI kw .>> spaces
-//            attempt (many1Satisfy (fun c -> isAsciiLetter c) 
-//                     >>= (fun str ->
-//                          if (isKeyword str) && (str.ToUpper() = kw) then preturn ()
-//                          else pzero <?> (sprintf "keyword %s" kw)
-//                     ))                 
-
+            
         let identifier : Parser<string, unit> =
             let expectedIdentifier = expected "identifier"
             fun stream ->
@@ -213,7 +208,7 @@ module Sql =
                 termEx .>> spaces .>>. (opt (attempt alias))
 
             spaces >>. 
-            keyword "SELECT" >>. 
+            keyword "SELECT" >>. opt (skipStringCI "DISTINCT" <|> skipStringCI "TOP") >>. 
             spaces >>. 
             sepBy (projection |>> Projection) (pstring ",") 
 
@@ -281,4 +276,4 @@ ORDER BY Value ASC
 
 Sql.Parser.parse test
 
-FParsec.CharParsers.runParserOnFile Sql.Parser.sqlParser () @"C:\Appdev\sql\examples\example_1.sql" System.Text.Encoding.UTF8
+FParsec.CharParsers.runParserOnFile Sql.Parser.sqlParser () @"C:\Appdev\sql\examples\ef_default_query.sql" System.Text.Encoding.UTF8
