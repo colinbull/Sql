@@ -70,7 +70,7 @@ module Sql =
         open Ast
 
         let quote = skipStringCI "\"" <|> skipStringCI "'"
-        let identifierString = many1Satisfy (fun c -> not(System.Char.IsWhiteSpace c) && isNoneOf ['[';']'] c)
+        let identifierString = many1Satisfy (fun c -> not(System.Char.IsWhiteSpace c) && isNoneOf ['[';']';'.'] c)
 
         let keywords = [
             "SELECT"; "FROM"; "WHERE"; "JOIN"; "AS"; "GROUP"; "ORDER"; "HAVING"
@@ -99,7 +99,7 @@ module Sql =
                     Reply(Error, expectedIdentifier)
         
 
-        let quotedStr = quote >>. manyCharsTill anyChar quote
+        let quotedStr = ((skipChar 'N' >>.  quote) <|> quote) >>. manyCharsTill anyChar quote
 
         let strLiteral = quotedStr |>> Ast.String
         
@@ -267,7 +267,7 @@ let both =
 let test = """
 SELECT (3 + 2) * 6 as 'Value', tbl1.ID ID
 FROM dbo.Table1 tbl1
-JOIN dbo.Table2 tbl2 ON Value = f.Value
+JOIN dbo.Table2 tbl2 ON Value = f.Value AND tbl2.Key = N'MyKey'
 RIGHT OUTER JOIN [dbo].[Table3] tbl3 on tbl2.Value = tbl3.NotionalAmount
 LEFT OUTER JOIN dbo.Table4 tbl4 on tbl1.Value = tbl4.NotionalAmount
 WHERE ((Value = 36) AND (ID > 2)) OR ((x + 1) > 3)
@@ -276,4 +276,4 @@ ORDER BY Value ASC
 
 Sql.Parser.parse test
 
-FParsec.CharParsers.runParserOnFile Sql.Parser.sqlParser () @"C:\Appdev\sql\examples\ef_default_query.sql" System.Text.Encoding.UTF8
+//FParsec.CharParsers.runParserOnFile Sql.Parser.sqlParser () @"C:\Appdev\sql\examples\ef_default_query.sql" System.Text.Encoding.UTF8
