@@ -11,7 +11,7 @@ module Sql =
             | Gt | Lt | Gte | Lte | Eq
             | Add | Mul | Div | Sub | Mod
 
-        type UnOp =
+         type UnOp =
             | Like | Neg           
 
         type JoinDir =
@@ -22,16 +22,14 @@ module Sql =
         
         type OrderDir =
             | ASC | DESC
-        
-        type RefEx =
-            | Ref of string list
            
         type ValueEx =
             | String of string
             | Float of float
             | Integer of int
-            | Reference of RefEx
-            | Ident of string
+
+        type OrderEx =
+            | Order of string * OrderDir option
         
         type TermEx =
             | BinEx of (BinOp * TermEx * TermEx)
@@ -40,20 +38,19 @@ module Sql =
             | Not of TermEx
             | UnEx of UnOp * TermEx
             | Value of ValueEx
-        
-        type OrderEx =
-            | Order of string * OrderDir option
-        
-        type JoinEx =
-            | Join of (JoinDir option * JoinType) * (RefEx * string option) * TermEx
-
-        type ProjectionEx =
+            | Ref of string list
+            | QueryEx of Query
+            
+        and ProjectionEx =
             | Projection of TermEx * string option
 
-        type FromEx =
-            | From of (RefEx * string option)
-         
-        type Query = {
+        and JoinEx =
+            | Join of (JoinDir option * JoinType) * (TermEx * string option) * TermEx
+        
+        and FromEx =
+            | From of (TermEx * string option) 
+            
+        and Query = {
             Projection : ProjectionEx list
             Filters : TermEx option
             Order : OrderEx list
@@ -114,23 +111,27 @@ module Sql =
             ) .>> spaces
         
         let reference =
-            sepBy (identifier <|> (between (str_ws "[") (str_ws "]") identifier)) (pchar '.')
+            sepBy (identifier
+                   <|> (between (str_ws "[") (str_ws "]") identifier)) (pchar '.')
             |>> Ref
         
         type Assoc = Associativity
 
+        let (sqlParser, sqlParserRef) = createParserForwardedToRef()
+        
         let valueEx =
             choice [
-                strLiteral
-                numberLiteral
-                reference |>> Reference
-            ] |>> Value
-
+                sqlParser |>> QueryEx
+                numberLiteral |>> Value
+                strLiteral |>> Value
+                reference
+            ]
+        
         let termEx =
             let opp = new OperatorPrecedenceParser<Ast.TermEx, unit, unit>()
             let expr = opp.ExpressionParser
             let term =
-                spaces >>. (between (str_ws "(") (str_ws ")") expr <|> valueEx .>> spaces)
+                spaces >>. ((between (str_ws "(") (str_ws ")") expr) <|> valueEx) .>> spaces
                 
             opp.TermParser <- term
 
@@ -154,7 +155,7 @@ module Sql =
             opp.AddOperator(InfixOperator("OR", notFollowedBy letter >>. spaces, 1, Assoc.Left, (fun x y -> Or(x,y))))
 
             expr
-
+        
         let referenceEx = 
             reference .>>. attempt(opt alias)
 
@@ -207,23 +208,34 @@ module Sql =
             let projection = 
                 termEx .>> spaces .>>. (opt (attempt alias))
 
-            spaces >>. 
-            keyword "SELECT" >>. opt (skipStringCI "DISTINCT" <|> skipStringCI "TOP") >>. 
-            spaces >>. 
-            sepBy (projection |>> Projection) (pstring ",") 
+            let fromEx =
+                let nestedQuery =
+                    between (str_ws "(") (str_ws ")") sqlParser |>> QueryEx
+                    .>> spaces
+                    .>>. (opt (attempt alias)) |>> From
 
-        let fromEx = 
-            spaces >>. 
-            keyword "FROM" >>. 
-            spaces >>.
-            (sepBy ((reference .>>. (opt (attempt alias))) |>> From) (pstring ","))
+                let internalFrom =
+                    nestedQuery |>> List.singleton
+                    <|>
+                    (sepBy (reference .>>. (opt (attempt alias)) |>> From) (pstring ","))
+                
+                spaces >>. 
+                keyword "FROM" >>. 
+                spaces >>.
+                internalFrom   
 
-        let sqlParser =
+            
+            spaces >>. 
+            keyword "SELECT" >>. opt (skipStringCI "DISTINCT") >>. 
+            spaces >>. 
+            sepBy (projection |>> Projection) (pstring ",") .>>
+            spaces .>>.
+            fromEx
+                    
+        do sqlParserRef :=
             parse {
                 do! spaces
-                let! projection =  selectEx
-                do! spaces
-                let! from = fromEx
+                let! (projection, from) =  selectEx
                 do! spaces
                 let! join = joinEx
                 do! spaces 
@@ -246,7 +258,15 @@ module Sql =
 open FParsec
 
 let testSelect = 
-    FParsec.CharParsers.run Sql.Parser.selectEx "SELECT (3 + 2) * 6 as 'Value', tbl1.ID ID"
+    FParsec.CharParsers.run Sql.Parser.selectEx "SELECT (3 + 2) * 6 as 'Value', tbl1.ID ID FROM dbo.Table1 tbl1"
+
+
+let testSelectNested = 
+    FParsec.CharParsers.run Sql.Parser.selectEx """
+        SELECT (3 + 2) * 6 as 'Value', tbl1.ID ID
+        FROM (SELECT quux FROM dbo.Table3)
+    """
+
 
 let testWhere = 
     FParsec.CharParsers.run Sql.Parser.whereEx "WHERE ((Value = 36) AND (ID > 2)) OR (x + 1 > 3)"
@@ -262,18 +282,22 @@ let both =
             let! order = Sql.Parser.orderEx
             return (where, order)
         }
-    FParsec.CharParsers.run p """WHERE ((Value = 36) AND (ID > 2)) OR ((x + 1) > 3) ORDER BY Value ASC, ID DESC"""
+    FParsec.CharParsers.run p """
+    WHERE ((Value = 36) AND (ID > 2)) OR ((x + 1) > 3)
+    ORDER BY Value ASC, ID DESC"""
 
 let test = """
 SELECT (3 + 2) * 6 as 'Value', tbl1.ID ID
-FROM dbo.Table1 tbl1
+FROM (SELECT quux FROM dbo.Table3)
 JOIN dbo.Table2 tbl2 ON Value = f.Value AND tbl2.Key = N'MyKey'
 RIGHT OUTER JOIN [dbo].[Table3] tbl3 on tbl2.Value = tbl3.NotionalAmount
 LEFT OUTER JOIN dbo.Table4 tbl4 on tbl1.Value = tbl4.NotionalAmount
 WHERE ((Value = 36) AND (ID > 2)) OR ((x + 1) > 3)
-ORDER BY Value ASC
-"""
+ORDER BY Value ASC"""
 
-Sql.Parser.parse test
+//Sql.Parser.parse test
+
+
+
 
 //FParsec.CharParsers.runParserOnFile Sql.Parser.sqlParser () @"C:\Appdev\sql\examples\ef_default_query.sql" System.Text.Encoding.UTF8
