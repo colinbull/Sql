@@ -31,7 +31,8 @@ module Sql =
             | String of string
             | Float of float
             | Integer of int
-
+            | Null
+            
         type OrderEx =
             | Order of string * OrderDir option
         
@@ -43,7 +44,10 @@ module Sql =
             | UnEx of UnOp * TermEx
             | Value of ValueEx
             | Ref of string list
+            | Call of string * TermEx list
+            | Case of TermEx option * (TermEx * TermEx) list * TermEx
             | QueryEx of Query
+
             
         and ProjectionEx =
             | Projection of TermEx * string option
@@ -71,14 +75,15 @@ module Sql =
         open System
         open Ast
 
-        let symbols = "[]\"'()*".ToCharArray()
+        let symbols = "[]\"'()*,.".ToCharArray()
         let quote = skipStringCI "\"" <|> skipStringCI "'"
         let identifierString = many1Satisfy (fun c -> not(System.Char.IsWhiteSpace c) && isNoneOf symbols c)
 
         let keywords = [
             "SELECT"; "FROM"; "WHERE"; "JOIN"; "AS"; "GROUP"; "ORDER"; "HAVING"
             "BY"; "INNER"; "OUTER"; "LEFT"; "RIGHT"; "FULL"; "CROSS"; "ON"; "ASC"; "DESC";
-            "AND"; "OR"; "NOT"; "LIKE"; "ORDER BY"; "DISTINCT"; "TOP"
+            "AND"; "OR"; "NOT"; "LIKE"; "ORDER BY"; "DISTINCT"; "TOP"; "CASE"; "WHEN"; "THEN";
+            "END"; "IS"; "NULL"
         ]
         
         let str_ws s = pstring s .>> spaces
@@ -96,7 +101,7 @@ module Sql =
             fun stream ->
                 let state = stream.State
                 let reply = identifierString stream
-                if reply.Status = Ok && not (isKeyword reply.Result) 
+                if reply.Status = Ok && not(isKeyword reply.Result) 
                 then reply
                 else // result is keyword, so backtrack to before the string
                     stream.BacktrackTo(state)
@@ -109,6 +114,15 @@ module Sql =
         let numberLiteral =
             (pint32 |>> Ast.Integer) <|> (pfloat |>> Ast.Float)
 
+        let nullLiteral = keyword "NULL" >>% Null
+
+        let primitiveEx =
+            choice [
+                nullLiteral
+                strLiteral
+                numberLiteral
+            ] |>> Value
+        
         let alias =
             spaces >>. (
               (keyword "AS" >>. (quotedStr <|> identifier <|> (between_str "["  "]" identifier)))
@@ -144,7 +158,8 @@ module Sql =
             opp.AddOperator(InfixOperator("+", spaces, 2, Assoc.Left, (fun x y -> BinEx(BinOp.Add, x, y))))
             opp.AddOperator(InfixOperator("-", spaces, 2, Assoc.Left, (fun x y -> BinEx(BinOp.Sub, x, y))))
             opp.AddOperator(InfixOperator("%", spaces, 2, Assoc.Left, (fun x y -> BinEx(BinOp.Mod, x, y))))
-           
+        
+            opp.AddOperator(InfixOperator("IS", notFollowedBy letter >>. spaces, 2, Assoc.None, (fun x y -> BinEx(BinOp.Eq, x, y))))  
             opp.AddOperator(InfixOperator("=", spaces, 2, Assoc.None, (fun x y -> BinEx(BinOp.Eq, x, y))))
             opp.AddOperator(InfixOperator("<", spaces, 2, Assoc.None, (fun x y -> BinEx(BinOp.Lt, x, y))))
             opp.AddOperator(InfixOperator(">", spaces, 2, Assoc.None, (fun x y -> BinEx(BinOp.Gt, x, y))))
@@ -153,14 +168,26 @@ module Sql =
 
             opp.AddOperator(InfixOperator("AND", notFollowedBy letter >>. spaces, 2, Assoc.Left, (fun x y -> And(x,y))))
             opp.AddOperator(InfixOperator("OR", notFollowedBy letter >>. spaces, 2, Assoc.Left, (fun x y -> Or(x,y))))
-
+             
             between_str "(" ")" expr
             <|>
             expr
         
         let aliasedTermEx =
             spaces >>. (termEx .>>. (opt (attempt alias))) .>> spaces        
- 
+
+        let caseEx =
+            let cases =
+                manyTill (keyword "WHEN" >>. termEx .>> keyword "THEN" .>>. termEx) (keyword "ELSE") 
+                .>>. termEx .>> keyword "END"
+               
+            keyword "CASE" >>. (attempt (opt termEx)) .>>. cases
+            |>> (fun (cond, (cases, terminal)) -> Case(cond, cases, terminal))
+
+        let callEx =
+            identifier .>>. between_str "(" ")" (sepBy termEx (pstring ","))
+            |>> Call
+        
         let selectEx =
             let projections =
                 sepBy1 (aliasedTermEx |>> Projection) (pstring ",")    
@@ -241,9 +268,10 @@ module Sql =
         do
            sqlParserRef :=
                 choice [
+                    primitiveEx
                     reference
-                    strLiteral |>> Value
-                    numberLiteral |>> Value
+                    caseEx
+                    callEx
                     queryEx
                 ]
         

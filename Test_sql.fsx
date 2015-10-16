@@ -5,7 +5,19 @@ module ParserTests =
 
     let runParser p s =
         FParsec.CharParsers.run p s
+
+    let ``null``() =
+        runParser Sql.Parser.primitiveEx "null"
+
+    let ``string literal is null``() =
+        runParser Sql.Parser.termEx "2 IS NULL"
     
+    let ``n prefixed string``() =
+        runParser Sql.Parser.quotedStr "N'Foo'"
+
+    let ``empty n prefixed string``() =
+        runParser Sql.Parser.quotedStr "N''"
+      
     let ``references as identifiers``() =
         runParser Sql.Parser.reference "t"
 
@@ -32,6 +44,21 @@ module ParserTests =
 
     let ``term as star``() =
         runParser Sql.Parser.aliasedTermEx "*"
+
+    let ``case with one branch``() =
+        runParser Sql.Parser.caseEx "case when foo = 2 then 2 else 4 end"
+
+    let ``case with multiple branch``() =
+        runParser Sql.Parser.caseEx "case foo when 2 then 'Two' when 4 THEN 'Four' ELSE 'Other' END"  
+
+    let ``call``()  =
+        runParser Sql.Parser.callEx "LTRIM(f.F)"
+
+    let ``call multiple parameters``() =
+        runParser Sql.Parser.callEx "UPPER(f.b,b)"
+
+    let ``call in expr``() =
+        Sql.Parser.parse "case foo when 2 then CAST(NULL AS int) else 2 end"
 
     let ``where as equality``() =
         runParser Sql.Parser.whereEx "where f.F = 2"
@@ -86,3 +113,6 @@ module ParserTests =
 
     let ``select with nested query aliased``() =
         Sql.Parser.parse "SELECT * FROM (SELECT * FROM foo f) t"
+
+    let ``example file``() =
+        Sql.Parser.parse (System.IO.File.ReadAllText("examples/subquery.sql"))
