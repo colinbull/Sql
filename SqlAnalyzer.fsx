@@ -3,7 +3,11 @@
 #r "FParsec.dll"
 
 module Sql =
-
+    
+    open FParsec
+    open FParsec.Primitives
+    open FParsec.CharParsers
+    open System.Collections.Generic
 
     module Ast =
 
@@ -22,7 +26,7 @@ module Sql =
         
         type OrderDir =
             | ASC | DESC
-           
+
         type ValueEx =
             | String of string
             | Float of float
@@ -43,6 +47,8 @@ module Sql =
             
         and ProjectionEx =
             | Projection of TermEx * string option
+            | Distinct of ProjectionEx list
+            | Top of int * ProjectionEx list
 
         and JoinEx =
             | Join of (JoinDir option * JoinType) * (TermEx * string option) * TermEx
@@ -53,21 +59,21 @@ module Sql =
         and Query = {
             Projection : ProjectionEx list
             Filters : TermEx option
-            Order : OrderEx list
+            Order : OrderEx list option
             Join : JoinEx list
             From : FromEx list
         }
-         
+
+        type Assoc = Associativity
+        
     module Parser =
 
-        open FParsec
-        open FParsec.Primitives
-        open FParsec.CharParsers
-        open System.Collections.Generic
+        open System
         open Ast
 
+        let symbols = "[]\"'()*".ToCharArray()
         let quote = skipStringCI "\"" <|> skipStringCI "'"
-        let identifierString = many1Satisfy (fun c -> not(System.Char.IsWhiteSpace c) && isNoneOf ['[';']';'.'] c)
+        let identifierString = many1Satisfy (fun c -> not(System.Char.IsWhiteSpace c) && isNoneOf symbols c)
 
         let keywords = [
             "SELECT"; "FROM"; "WHERE"; "JOIN"; "AS"; "GROUP"; "ORDER"; "HAVING"
@@ -77,12 +83,13 @@ module Sql =
         
         let str_ws s = pstring s .>> spaces
         let str_ws1 s = pstring s .>> spaces1
-
+        let between_str a b p = between (str_ws a) (str_ws b) p 
+        
         let keywordSet = new HashSet<string>(keywords)
         let isKeyword (kw:string) = keywordSet.Contains(kw.ToUpper())
         
-        let keyword (kw:string) : Parser<string, unit> = 
-            pstringCI kw .>> spaces
+        let keyword (kw:string) = 
+            spaces >>. skipStringCI kw >>. spaces
             
         let identifier : Parser<string, unit> =
             let expectedIdentifier = expected "identifier"
@@ -95,7 +102,6 @@ module Sql =
                     stream.BacktrackTo(state)
                     Reply(Error, expectedIdentifier)
         
-
         let quotedStr = ((skipChar 'N' >>.  quote) <|> quote) >>. manyCharsTill anyChar quote
 
         let strLiteral = quotedStr |>> Ast.String
@@ -105,33 +111,27 @@ module Sql =
 
         let alias =
             spaces >>. (
-              (keyword "AS" >>. spaces >>. (quotedStr <|> identifier <|> (between (str_ws "[") (str_ws "]") identifier)))
+              (keyword "AS" >>. (quotedStr <|> identifier <|> (between_str "["  "]" identifier)))
               <|>
               (quotedStr <|> identifier) 
             ) .>> spaces
         
         let reference =
-            sepBy (identifier
-                   <|> (between (str_ws "[") (str_ws "]") identifier)) (pchar '.')
+            spaces >>.
+            sepBy1 ((pstring "*")
+                    <|> identifier
+                    <|> (between_str "[" "]" identifier)
+                   ) (pchar '.')
+            .>> spaces
             |>> Ref
-        
-        type Assoc = Associativity
-
+                
         let (sqlParser, sqlParserRef) = createParserForwardedToRef()
-        
-        let valueEx =
-            choice [
-                sqlParser |>> QueryEx
-                numberLiteral |>> Value
-                strLiteral |>> Value
-                reference
-            ]
-        
+                
         let termEx =
             let opp = new OperatorPrecedenceParser<Ast.TermEx, unit, unit>()
             let expr = opp.ExpressionParser
             let term =
-                spaces >>. ((between (str_ws "(") (str_ws ")") expr) <|> valueEx) .>> spaces
+                spaces >>. ((between_str "("  ")" expr) <|> sqlParser) .>> spaces
                 
             opp.TermParser <- term
 
@@ -141,40 +141,44 @@ module Sql =
 
             opp.AddOperator(InfixOperator("*", spaces, 1, Assoc.Left, (fun x y -> BinEx(BinOp.Mul, x, y))))
             opp.AddOperator(InfixOperator("/", spaces, 1, Assoc.Left, (fun x y -> BinEx(BinOp.Div, x, y))))
-            opp.AddOperator(InfixOperator("+", spaces, 1, Assoc.Left, (fun x y -> BinEx(BinOp.Add, x, y))))
-            opp.AddOperator(InfixOperator("-", spaces, 1, Assoc.Left, (fun x y -> BinEx(BinOp.Sub, x, y))))
-            opp.AddOperator(InfixOperator("%", spaces, 1, Assoc.Left, (fun x y -> BinEx(BinOp.Mod, x, y))))
+            opp.AddOperator(InfixOperator("+", spaces, 2, Assoc.Left, (fun x y -> BinEx(BinOp.Add, x, y))))
+            opp.AddOperator(InfixOperator("-", spaces, 2, Assoc.Left, (fun x y -> BinEx(BinOp.Sub, x, y))))
+            opp.AddOperator(InfixOperator("%", spaces, 2, Assoc.Left, (fun x y -> BinEx(BinOp.Mod, x, y))))
            
-            opp.AddOperator(InfixOperator("=", spaces, 1, Assoc.Left, (fun x y -> BinEx(BinOp.Eq, x, y))))
-            opp.AddOperator(InfixOperator("<", spaces, 1, Assoc.Left, (fun x y -> BinEx(BinOp.Lt, x, y))))
-            opp.AddOperator(InfixOperator(">", spaces, 1, Assoc.Left, (fun x y -> BinEx(BinOp.Gt, x, y))))
-            opp.AddOperator(InfixOperator("<=", spaces, 1, Assoc.Left, (fun x y -> BinEx(BinOp.Lte, x, y))))
-            opp.AddOperator(InfixOperator(">=", spaces, 1, Assoc.Left, (fun x y -> BinEx(BinOp.Gte, x, y))))
+            opp.AddOperator(InfixOperator("=", spaces, 2, Assoc.None, (fun x y -> BinEx(BinOp.Eq, x, y))))
+            opp.AddOperator(InfixOperator("<", spaces, 2, Assoc.None, (fun x y -> BinEx(BinOp.Lt, x, y))))
+            opp.AddOperator(InfixOperator(">", spaces, 2, Assoc.None, (fun x y -> BinEx(BinOp.Gt, x, y))))
+            opp.AddOperator(InfixOperator("<=", spaces, 2, Assoc.None, (fun x y -> BinEx(BinOp.Lte, x, y))))
+            opp.AddOperator(InfixOperator(">=", spaces, 2, Assoc.None, (fun x y -> BinEx(BinOp.Gte, x, y))))
 
-            opp.AddOperator(InfixOperator("AND", notFollowedBy letter >>. spaces, 1, Assoc.Left, (fun x y -> And(x,y))))
-            opp.AddOperator(InfixOperator("OR", notFollowedBy letter >>. spaces, 1, Assoc.Left, (fun x y -> Or(x,y))))
+            opp.AddOperator(InfixOperator("AND", notFollowedBy letter >>. spaces, 2, Assoc.Left, (fun x y -> And(x,y))))
+            opp.AddOperator(InfixOperator("OR", notFollowedBy letter >>. spaces, 2, Assoc.Left, (fun x y -> Or(x,y))))
 
+            between_str "(" ")" expr
+            <|>
             expr
         
-        let referenceEx = 
-            reference .>>. attempt(opt alias)
-
-        let whereEx =
-            opt <| attempt (spaces .>> (keyword "WHERE") .>> spaces >>. termEx)
-
-        let orderEx =
-            let direction = 
-                opt (
-                      ((keyword "ASC") >>% OrderDir.ASC)
-                       <|>
-                      ((keyword "DESC") >>% OrderDir.DESC)
-                )
+        let aliasedTermEx =
+            spaces >>. (termEx .>>. (opt (attempt alias))) .>> spaces        
+ 
+        let selectEx =
+            let projections =
+                sepBy1 (aliasedTermEx |>> Projection) (pstring ",")    
             
-            let ids = 
-                (spaces >>. (identifier .>>. attempt (spaces >>. direction .>> spaces)))
+            let modifiers =
+                choice [
+                    keyword "DISTINCT" >>. projections |>> fun x -> [Distinct x]
+                    keyword "TOP" >>. pint32 .>> spaces .>>. projections |>> (fun (i, ps) ->  [Top(i, ps)])
+                    projections
+                ]
+            
+            keyword "SELECT" >>. modifiers
+           
+        let fromEx =
+            keyword "FROM" >>.
+            sepBy1 (aliasedTermEx |>> From) (pstring ",")
 
-            attempt (spaces .>> keyword "ORDER BY" >>. (sepBy ids (pstring ",")) .>> spaces)
-            |>> List.map OrderEx.Order
+        let whereEx = keyword "WHERE" >>. termEx
 
         let joinEx =
             let joinDir =
@@ -196,108 +200,54 @@ module Sql =
                 ] .>> spaces
 
             let joinClass =
-                spaces >>. (joinDir .>>. joinType) .>> spaces
+                (joinDir .>>. joinType)
             
             let join =
-                (joinClass .>>. referenceEx .>> spaces .>> keyword "ON" .>> spaces .>>. termEx .>> spaces)
+                (joinClass .>>. aliasedTermEx .>> keyword "ON" .>>. termEx)
                 |>> (fun ((x,y),z) -> Join(x,y,z))
         
             attempt (manyTill join (notFollowedBy joinClass)) 
-        
-        let selectEx = 
-            let projection = 
-                termEx .>> spaces .>>. (opt (attempt alias))
 
-            let fromEx =
-                let nestedQuery =
-                    between (str_ws "(") (str_ws ")") sqlParser |>> QueryEx
-                    .>> spaces
-                    .>>. (opt (attempt alias)) |>> From
-
-                let internalFrom =
-                    nestedQuery |>> List.singleton
-                    <|>
-                    (sepBy (reference .>>. (opt (attempt alias)) |>> From) (pstring ","))
-                
-                spaces >>. 
-                keyword "FROM" >>. 
-                spaces >>.
-                internalFrom   
-
+        let orderEx =
+            let direction = 
+                opt (
+                      ((keyword "ASC") >>% OrderDir.ASC)
+                       <|>
+                      ((keyword "DESC") >>% OrderDir.DESC)
+                )
             
-            spaces >>. 
-            keyword "SELECT" >>. opt (skipStringCI "DISTINCT") >>. 
-            spaces >>. 
-            sepBy (projection |>> Projection) (pstring ",") .>>
-            spaces .>>.
-            fromEx
-                    
-        do sqlParserRef :=
+            let ids = 
+                (spaces >>. (identifier .>>. attempt (spaces >>. direction .>> spaces)))
+
+            keyword "ORDER BY" >>. (sepBy ids (pstring ","))
+            |>> List.map OrderEx.Order
+        
+        let queryEx =
             parse {
-                do! spaces
-                let! (projection, from) =  selectEx
-                do! spaces
+                let! select = selectEx
+                let! from = fromEx
                 let! join = joinEx
-                do! spaces 
-                let! where = whereEx
-                do! spaces
-                let! order = orderEx
-                do! spaces
-                return { Projection = projection; 
-                         From = from; 
-                         Filters = where; 
-                         Join = join; 
-                         Order = order }
-            }
-                            
+                let! where = attempt (opt whereEx)
+                let! order = attempt (opt orderEx)
+                return {
+                   Projection = select
+                   Filters = where
+                   Order = order
+                   Join = join
+                   From = from
+                }
+            } |>> QueryEx
+            
+        do
+           sqlParserRef :=
+                choice [
+                    reference
+                    strLiteral |>> Value
+                    numberLiteral |>> Value
+                    queryEx
+                ]
+        
         let parse (str:string) =
             match run sqlParser (str.Trim()) with
             | Success(r,_,_) -> r
             | Failure(msg, err,_) -> failwithf "Failed to parse %s'" msg
-            
-open FParsec
-
-let testSelect = 
-    FParsec.CharParsers.run Sql.Parser.selectEx "SELECT (3 + 2) * 6 as 'Value', tbl1.ID ID FROM dbo.Table1 tbl1"
-
-
-let testSelectNested = 
-    FParsec.CharParsers.run Sql.Parser.selectEx """
-        SELECT (3 + 2) * 6 as 'Value', tbl1.ID ID
-        FROM (SELECT quux FROM dbo.Table3)
-    """
-
-
-let testWhere = 
-    FParsec.CharParsers.run Sql.Parser.whereEx "WHERE ((Value = 36) AND (ID > 2)) OR (x + 1 > 3)"
-
-let testOrderby = 
-    FParsec.CharParsers.run Sql.Parser.orderEx "ORDER BY Value ASC, ID DESC"
-
-let both = 
-    let p = 
-        parse { 
-            let! where = Sql.Parser.whereEx
-            do! spaces
-            let! order = Sql.Parser.orderEx
-            return (where, order)
-        }
-    FParsec.CharParsers.run p """
-    WHERE ((Value = 36) AND (ID > 2)) OR ((x + 1) > 3)
-    ORDER BY Value ASC, ID DESC"""
-
-let test = """
-SELECT (3 + 2) * 6 as 'Value', tbl1.ID ID
-FROM (SELECT quux FROM dbo.Table3)
-JOIN dbo.Table2 tbl2 ON Value = f.Value AND tbl2.Key = N'MyKey'
-RIGHT OUTER JOIN [dbo].[Table3] tbl3 on tbl2.Value = tbl3.NotionalAmount
-LEFT OUTER JOIN dbo.Table4 tbl4 on tbl1.Value = tbl4.NotionalAmount
-WHERE ((Value = 36) AND (ID > 2)) OR ((x + 1) > 3)
-ORDER BY Value ASC"""
-
-//Sql.Parser.parse test
-
-
-
-
-//FParsec.CharParsers.runParserOnFile Sql.Parser.sqlParser () @"C:\Appdev\sql\examples\ef_default_query.sql" System.Text.Encoding.UTF8
