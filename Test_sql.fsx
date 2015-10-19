@@ -72,6 +72,9 @@ module ParserTests =
     let ``join as equality``() =
         runParser Sql.Parser.joinEx "join bar b ON (b.B = f.F)"
 
+    let ``join with brackets``() =
+        runParser Sql.Parser.joinEx "join (bar) b ON b.B = f.F"
+
     let ``select from``() =
         Sql.Parser.parse "SELECT * FROM foo"
 
@@ -100,7 +103,7 @@ module ParserTests =
         Sql.Parser.parse "SELECT * FROM foo WHERE f.Value = 2"
 
     let ``select from join``() =
-        Sql.Parser.parse """SELECT * FROM foo f JOIN bar b ON (b.B = f.F)"""
+        Sql.Parser.parse """SELECT * FROM foo f INNER JOIN bar as b ON (b.B = f.F)"""
 
     let ``select from join where``() =
         Sql.Parser.parse """
@@ -117,8 +120,16 @@ module ParserTests =
                         AND ([Extent1].[order_num] = [Extent2].[order_num])
                         AND ([Extent1].[item_num] = [Extent2].[item_num])
             WHERE f.F = 2
+           """
+    
+    let ``select with nested join``() =
+        Sql.Parser.parse """
+        SELECT * FROM foo f
+        INNER JOIN (SELECT *    
+                     FROM bar AS b)
+        AS c ON (c.A = f.A)
         """
-
+    
     let ``select distinct from``() =
         Sql.Parser.parse """SELECT DISTINCT * FROM foo f """
 

@@ -140,13 +140,17 @@ module Sql =
             ) .>> spaces
         
         let reference =
-            spaces >>.
-            sepBy1 ((pstring "*")
-                    <|> identifier
-                    <|> (between_str "[" "]" identifier)
-                   ) (pchar '.')
-            .>> spaces
-            |>> Ref
+            let r = 
+                spaces >>.
+                sepBy1 ((pstring "*")
+                        <|> identifier
+                        <|> (between_str "[" "]" identifier)
+                       ) (pchar '.')
+                .>> spaces
+                |>> Ref
+            between_str "(" ")" r
+            <|>
+            r
                 
         let (sqlParser, sqlParserRef) = createParserForwardedToRef()
                 
@@ -177,15 +181,15 @@ module Sql =
 
             opp.AddOperator(InfixOperator("AND", notFollowedBy letter >>. spaces, 2, Assoc.Left, (fun x y -> And(x,y))))
             opp.AddOperator(InfixOperator("OR", notFollowedBy letter >>. spaces, 2, Assoc.Left, (fun x y -> Or(x,y))))
-             
+
+            between_str "(" ")" expr
+            <|>
             expr
 
         
         let aliasedTermEx =
-            let t = spaces >>. (termEx .>>. (opt (attempt alias))) .>> spaces        
-            between_str "(" ")" t
-            <|>
-            t
+            let t = (termEx .>>. (opt (attempt alias)))
+            spaces >>. t .>> spaces
             
         let termOrCastEx =
             let cast =
@@ -255,7 +259,7 @@ module Sql =
                 (joinClass .>>. aliasedTermEx .>> keyword "ON" .>>. termEx)
                 |>> (fun ((x,y),z) -> Join(x,y,z))
         
-            attempt (manyTill join (notFollowedBy joinClass)) 
+            manyTill join (notFollowedBy joinClass)
 
         let groupByEx =
             keyword "GROUP BY" >>. sepBy1 (aliasedTermEx |>> Group) (pstring ",")    
@@ -278,7 +282,7 @@ module Sql =
             parse {
                 let! select = selectEx
                 let! from = fromEx
-                let! join = joinEx
+                let! join = attempt joinEx
                 let! where = attempt (opt whereEx)
                 let! group = attempt (opt groupByEx)
                 let! order = attempt (opt orderEx)
