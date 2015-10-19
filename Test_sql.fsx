@@ -51,14 +51,20 @@ module ParserTests =
     let ``case with multiple branch``() =
         runParser Sql.Parser.caseEx "case foo when 2 then 'Two' when 4 THEN 'Four' ELSE 'Other' END"  
 
+    let ``case with calls``() =
+        runParser Sql.Parser.caseEx "CASE WHEN (([Extent4].[alloc_num] IS NULL) AND ([Extent4].[alloc_item_num] IS NULL)) THEN [Extent2].[del_date_from] ELSE  CAST([Extent4].[nomin_date_from] AS datetime) END"
+    
     let ``call``()  =
         runParser Sql.Parser.callEx "LTRIM(f.F)"
+
+    let ``call with leading space``()  =
+        runParser Sql.Parser.callEx "LTRIM( f.F)"
 
     let ``call multiple parameters``() =
         runParser Sql.Parser.callEx "UPPER(f.b,b)"
 
-    let ``call in expr``() =
-        Sql.Parser.parse "case foo when 2 then CAST(NULL AS int) else 2 end"
+    let ``call with expr``() =
+        Sql.Parser.parse "CAST(NULL AS int)"
 
     let ``where as equality``() =
         runParser Sql.Parser.whereEx "where f.F = 2"
@@ -102,6 +108,17 @@ module ParserTests =
             JOIN bar b ON b.B = f.F
             WHERE f.F = 2
         """
+
+    let ``select from join with brackets``() =
+        Sql.Parser.parse """
+            SELECT * FROM foo f
+           	INNER JOIN [dbo].[trade_item_wet_phy] AS [Extent2] ON
+                        ([Extent1].[trade_num] = [Extent2].[trade_num])
+                        AND ([Extent1].[order_num] = [Extent2].[order_num])
+                        AND ([Extent1].[item_num] = [Extent2].[item_num])
+            WHERE f.F = 2
+        """
+
     let ``select distinct from``() =
         Sql.Parser.parse """SELECT DISTINCT * FROM foo f """
 

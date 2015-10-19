@@ -44,6 +44,7 @@ module Sql =
             | UnEx of UnOp * TermEx
             | Value of ValueEx
             | Ref of string list
+            | Cast of TermEx * string
             | Call of string * TermEx list
             | Case of TermEx option * (TermEx * TermEx) list * TermEx
             | QueryEx of Query
@@ -115,14 +116,18 @@ module Sql =
             (pint32 |>> Ast.Integer) <|> (pfloat |>> Ast.Float)
 
         let nullLiteral = keyword "NULL" >>% Null
-
-        let primitiveEx =
+                
+        let primitiveLiteral =
             choice [
                 nullLiteral
                 strLiteral
                 numberLiteral
-            ] |>> Value
-        
+            ]
+
+        let primitiveEx =
+            spaces >>. primitiveLiteral .>> spaces
+            |>> Value
+            
         let alias =
             spaces >>. (
               (keyword "AS" >>. (quotedStr <|> identifier <|> (between_str "["  "]" identifier)))
@@ -145,7 +150,7 @@ module Sql =
             let opp = new OperatorPrecedenceParser<Ast.TermEx, unit, unit>()
             let expr = opp.ExpressionParser
             let term =
-                spaces >>. ((between_str "("  ")" expr) <|> sqlParser) .>> spaces
+                spaces >>. ((between_str "("  ")" expr) <|> (between_str "("  ")" sqlParser) <|> sqlParser) .>> spaces
                 
             opp.TermParser <- term
 
@@ -169,23 +174,36 @@ module Sql =
             opp.AddOperator(InfixOperator("AND", notFollowedBy letter >>. spaces, 2, Assoc.Left, (fun x y -> And(x,y))))
             opp.AddOperator(InfixOperator("OR", notFollowedBy letter >>. spaces, 2, Assoc.Left, (fun x y -> Or(x,y))))
              
-            between_str "(" ")" expr
-            <|>
             expr
+
         
         let aliasedTermEx =
-            spaces >>. (termEx .>>. (opt (attempt alias))) .>> spaces        
+            let t = spaces >>. (termEx .>>. (opt (attempt alias))) .>> spaces        
+            between_str "(" ")" t
+            <|>
+            t
+            
+        let termOrCastEx =
+            let cast =
+                attempt (opt (keyword "AS" >>.  identifier))
+            spaces >>. termEx .>> spaces .>>. cast .>> spaces
+            |>> function
+                | a, None -> a
+                | a, Some b -> Cast(a, b)
 
         let caseEx =
             let cases =
-                manyTill (keyword "WHEN" >>. termEx .>> keyword "THEN" .>>. termEx) (keyword "ELSE") 
-                .>>. termEx .>> keyword "END"
+                manyTill (keyword "WHEN" >>. (termOrCastEx <|> termEx)
+                          .>> keyword "THEN"
+                           .>>. (termOrCastEx <|> termEx)
+                          ) (keyword "ELSE") 
+                .>>.  (termOrCastEx <|> termEx) .>> keyword "END"
                
             keyword "CASE" >>. (attempt (opt termEx)) .>>. cases
             |>> (fun (cond, (cases, terminal)) -> Case(cond, cases, terminal))
 
         let callEx =
-            identifier .>>. between_str "(" ")" (sepBy termEx (pstring ","))
+            identifier .>>. between_str "(" ")" (sepBy (termOrCastEx <|> termEx) (pstring ","))
             |>> Call
         
         let selectEx =
@@ -268,10 +286,10 @@ module Sql =
         do
            sqlParserRef :=
                 choice [
+                    attempt callEx
                     primitiveEx
                     reference
                     caseEx
-                    callEx
                     queryEx
                 ]
         
