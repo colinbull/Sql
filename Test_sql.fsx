@@ -124,6 +124,9 @@ module ParserTests =
 
     let ``select top from``() =
         Sql.Parser.parse """SELECT TOP 100 * FROM foo f"""
+
+    let ``select from groupby``() =
+        Sql.Parser.parse "SELECT * FROM foo f GROUP BY f.Value"
                     
     let ``select with nested query``() =
         Sql.Parser.parse "SELECT * FROM (SELECT * FROM foo f)"

@@ -60,13 +60,17 @@ module Sql =
         
         and FromEx =
             | From of (TermEx * string option) 
-            
+
+        and GroupByEx =
+            | Group of TermEx * string option
+                    
         and Query = {
             Projection : ProjectionEx list
             Filters : TermEx option
             Order : OrderEx list option
             Join : JoinEx list
             From : FromEx list
+            GroupBy : GroupByEx list option
         }
 
         type Assoc = Associativity
@@ -253,6 +257,9 @@ module Sql =
         
             attempt (manyTill join (notFollowedBy joinClass)) 
 
+        let groupByEx =
+            keyword "GROUP BY" >>. sepBy1 (aliasedTermEx |>> Group) (pstring ",")    
+        
         let orderEx =
             let direction = 
                 opt (
@@ -273,6 +280,7 @@ module Sql =
                 let! from = fromEx
                 let! join = joinEx
                 let! where = attempt (opt whereEx)
+                let! group = attempt (opt groupByEx)
                 let! order = attempt (opt orderEx)
                 return {
                    Projection = select
@@ -280,6 +288,7 @@ module Sql =
                    Order = order
                    Join = join
                    From = from
+                   GroupBy = group
                 }
             } |>> QueryEx
             
