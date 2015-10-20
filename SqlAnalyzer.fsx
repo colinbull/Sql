@@ -31,6 +31,7 @@ module Sql =
             | String of string
             | Float of float
             | Integer of int
+            | Bool of bool
             | Null
             
         type OrderEx =
@@ -88,7 +89,7 @@ module Sql =
             "SELECT"; "FROM"; "WHERE"; "JOIN"; "AS"; "GROUP"; "ORDER"; "HAVING"
             "BY"; "INNER"; "OUTER"; "LEFT"; "RIGHT"; "FULL"; "CROSS"; "ON"; "ASC"; "DESC";
             "AND"; "OR"; "NOT"; "LIKE"; "ORDER BY"; "DISTINCT"; "TOP"; "CASE"; "WHEN"; "THEN";
-            "END"; "IS"; "NULL"
+            "END"; "IS"; "NULL"; "TRUE"; "FALSE";
         ]
         
         let str_ws s = pstring s .>> spaces
@@ -120,10 +121,17 @@ module Sql =
             (pint32 |>> Ast.Integer) <|> (pfloat |>> Ast.Float)
 
         let nullLiteral = keyword "NULL" >>% Null
+
+        let boolLiteral =
+            choice [
+                keyword "TRUE" |>> (fun _ -> Bool true)
+                keyword "FALSE" |>> (fun _ -> Bool false)
+            ]
                 
         let primitiveLiteral =
             choice [
                 nullLiteral
+                boolLiteral
                 strLiteral
                 numberLiteral
             ]
@@ -168,19 +176,19 @@ module Sql =
 
             opp.AddOperator(InfixOperator("*", spaces, 1, Assoc.Left, (fun x y -> BinEx(BinOp.Mul, x, y))))
             opp.AddOperator(InfixOperator("/", spaces, 1, Assoc.Left, (fun x y -> BinEx(BinOp.Div, x, y))))
-            opp.AddOperator(InfixOperator("+", spaces, 2, Assoc.Left, (fun x y -> BinEx(BinOp.Add, x, y))))
-            opp.AddOperator(InfixOperator("-", spaces, 2, Assoc.Left, (fun x y -> BinEx(BinOp.Sub, x, y))))
-            opp.AddOperator(InfixOperator("%", spaces, 2, Assoc.Left, (fun x y -> BinEx(BinOp.Mod, x, y))))
+            opp.AddOperator(InfixOperator("+", spaces, 1, Assoc.Left, (fun x y -> BinEx(BinOp.Add, x, y))))
+            opp.AddOperator(InfixOperator("-", spaces, 1, Assoc.Left, (fun x y -> BinEx(BinOp.Sub, x, y))))
+            opp.AddOperator(InfixOperator("%", spaces, 1, Assoc.Left, (fun x y -> BinEx(BinOp.Mod, x, y))))
         
             opp.AddOperator(InfixOperator("IS", notFollowedBy letter >>. spaces, 2, Assoc.None, (fun x y -> BinEx(BinOp.Eq, x, y))))  
-            opp.AddOperator(InfixOperator("=", spaces, 2, Assoc.None, (fun x y -> BinEx(BinOp.Eq, x, y))))
-            opp.AddOperator(InfixOperator("<", spaces, 2, Assoc.None, (fun x y -> BinEx(BinOp.Lt, x, y))))
-            opp.AddOperator(InfixOperator(">", spaces, 2, Assoc.None, (fun x y -> BinEx(BinOp.Gt, x, y))))
-            opp.AddOperator(InfixOperator("<=", spaces, 2, Assoc.None, (fun x y -> BinEx(BinOp.Lte, x, y))))
-            opp.AddOperator(InfixOperator(">=", spaces, 2, Assoc.None, (fun x y -> BinEx(BinOp.Gte, x, y))))
+            opp.AddOperator(InfixOperator("=", spaces, 1, Assoc.None, (fun x y -> BinEx(BinOp.Eq, x, y))))
+            opp.AddOperator(InfixOperator("<", spaces, 1, Assoc.None, (fun x y -> BinEx(BinOp.Lt, x, y))))
+            opp.AddOperator(InfixOperator(">", spaces, 1, Assoc.None, (fun x y -> BinEx(BinOp.Gt, x, y))))
+            opp.AddOperator(InfixOperator("<=", spaces, 1, Assoc.None, (fun x y -> BinEx(BinOp.Lte, x, y))))
+            opp.AddOperator(InfixOperator(">=", spaces, 1, Assoc.None, (fun x y -> BinEx(BinOp.Gte, x, y))))
 
-            opp.AddOperator(InfixOperator("AND", notFollowedBy letter >>. spaces, 2, Assoc.Left, (fun x y -> And(x,y))))
-            opp.AddOperator(InfixOperator("OR", notFollowedBy letter >>. spaces, 2, Assoc.Left, (fun x y -> Or(x,y))))
+            opp.AddOperator(InfixOperator("AND", notFollowedBy letter >>. spaces, 1, Assoc.Left, (fun x y -> And(x,y))))
+            opp.AddOperator(InfixOperator("OR", notFollowedBy letter >>. spaces, 1, Assoc.Left, (fun x y -> Or(x,y))))
 
             between_str "(" ")" expr
             <|>

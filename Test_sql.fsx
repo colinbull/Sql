@@ -1,106 +1,176 @@
 #load "SqlAnalyzer.fsx"
 
 module ParserTests =
-    open SqlAnalyzer
 
+    open SqlAnalyzer
+    open SqlAnalyzer.Sql.Ast    
+    open FParsec
+
+    type Test = class end
+    
     let runParser p s =
-        FParsec.CharParsers.run p s
+        match FParsec.CharParsers.run p s with
+        | Success(x,_,_) -> x
+        | Failure(msg, err, _) -> failwithf "Failed %A" msg
 
     let ``null``() =
-        runParser Sql.Parser.primitiveEx "null"
-
+        runParser Sql.Parser.primitiveEx "null" = Value(Null)
+        
     let ``string literal is null``() =
-        runParser Sql.Parser.termEx "2 IS NULL"
+        runParser Sql.Parser.termEx "2 IS NULL" = (BinEx(BinOp.Eq, Value(Integer 2), Value(Null)))
     
     let ``n prefixed string``() =
-        runParser Sql.Parser.quotedStr "N'Foo'"
+        runParser Sql.Parser.quotedStr "N'Foo'" = "Foo"
 
     let ``empty n prefixed string``() =
-        runParser Sql.Parser.quotedStr "N''"
+        runParser Sql.Parser.quotedStr "N''" = ""
       
     let ``references as identifiers``() =
-        runParser Sql.Parser.reference "t"
+        runParser Sql.Parser.reference "t" = Ref(["t"])
 
     let ``multipart references``() =
-        runParser Sql.Parser.reference "t.A"
+        runParser Sql.Parser.reference "t.A" = Ref(["t"; "A"])
 
     let ``star as a reference``() =
-        runParser Sql.Parser.reference "*"
+        runParser Sql.Parser.reference "*" = Ref(["*"])
 
     let ``term as arithemtic``() =
-        runParser Sql.Parser.termEx "1 + 2"
+        runParser Sql.Parser.termEx "1 + 2" = BinEx(BinOp.Add, Value(Integer 1), Value(Integer 2))
 
     let ``term as reference``() =
-        runParser Sql.Parser.termEx "t.A"
+        runParser Sql.Parser.termEx "t.A" = Ref(["t"; "A"])
 
     let ``term as boolean ex``() =
-        runParser Sql.Parser.termEx "true AND false"
+        runParser Sql.Parser.termEx "true AND false" = And(Value(Bool true), Value(Bool false))
 
     let ``term with alias``() =
-        runParser Sql.Parser.aliasedTermEx "t.A A"
+        runParser Sql.Parser.aliasedTermEx "t.A A" = (Ref(["t"; "A"]), Some "A")
 
     let ``term without alias``() =
-        runParser Sql.Parser.aliasedTermEx "t.A"
+        runParser Sql.Parser.aliasedTermEx "t.A" = (Ref(["t"; "A"]), None)
 
     let ``term as star``() =
-        runParser Sql.Parser.aliasedTermEx "*"
+        runParser Sql.Parser.aliasedTermEx "*" = (Ref(["*"]), None)
 
     let ``case with one branch``() =
-        runParser Sql.Parser.caseEx "case when foo = 2 then 2 else 4 end"
-
+        let actual = runParser Sql.Parser.caseEx "case when foo = 2 then 2 else 4 end"
+        let expected = Case(None, [BinEx(BinOp.Eq, Ref(["foo"]), Value(Integer 2)), Value(Integer 2)], Value(Integer 4))
+        actual = expected
+        
     let ``case with multiple branch``() =
-        runParser Sql.Parser.caseEx "case foo when 2 then 'Two' when 4 THEN 'Four' ELSE 'Other' END"  
-
+        let actual = runParser Sql.Parser.caseEx "case foo when 2 then 'Two' when 4 THEN 'Four' ELSE 'Other' END"  
+        let expected = Case(Some(Ref ["foo"]),[Value(Integer 2), Value(String "Two"); Value(Integer 4), Value(String "Four")], Value(String "Other"))
+        actual = expected
+     
     let ``case with calls``() =
-        runParser Sql.Parser.caseEx "CASE WHEN (([Extent4].[alloc_num] IS NULL) AND ([Extent4].[alloc_item_num] IS NULL)) THEN [Extent2].[del_date_from] ELSE  CAST([Extent4].[nomin_date_from] AS datetime) END"
-    
+        let actual = runParser Sql.Parser.caseEx "CASE WHEN ((a IS NULL) AND (b IS NULL)) THEN c ELSE  CAST(d AS datetime) END"
+        let expected = Case(None,[And(BinEx(Eq, Ref["a"], Value(Null)), BinEx(Eq, Ref["b"], Value(Null))), Ref["c"]], Call("CAST", [Cast(Ref ["d"], "datetime")]))
+        actual = expected
+        
     let ``call``()  =
-        runParser Sql.Parser.callEx "LTRIM(f.F)"
+        runParser Sql.Parser.callEx "LTRIM(f.F)" = Call("LTRIM", [Ref ["f";"F"]])
 
     let ``call with leading space``()  =
-        runParser Sql.Parser.callEx "LTRIM( f.F)"
+        runParser Sql.Parser.callEx "LTRIM( f.F)" = Call("LTRIM", [Ref ["f";"F"]])
 
     let ``call multiple parameters``() =
-        runParser Sql.Parser.callEx "UPPER(f.b,b)"
+        runParser Sql.Parser.callEx "UPPER(f.b,b)" = Call("UPPER", [Ref ["f";"b"]; Ref["b"]])
 
     let ``call with expr``() =
-        Sql.Parser.parse "CAST(NULL AS int)"
+        Sql.Parser.parse "CAST(NULL AS int)" = Call("CAST", [Cast(Value(Null), "int")])
 
     let ``where as equality``() =
-        runParser Sql.Parser.whereEx "where f.F = 2"
+        runParser Sql.Parser.whereEx "where f.F = 2" = BinEx(Eq, Ref["f";"F"], Value(Integer 2))
 
     let ``join as equality``() =
-        runParser Sql.Parser.joinEx "join bar b ON (b.B = f.F)"
+        let actual = runParser Sql.Parser.joinEx "join bar b ON (b.B = f.F)"
+        let expected = [Join((None, Inner), (Ref ["bar"], Some "b"), BinEx(Eq, Ref["b";"B"], Ref["f";"F"]))]
+        actual = expected
 
     let ``join with brackets``() =
-        runParser Sql.Parser.joinEx "join (bar) b ON b.B = f.F"
+        let actual = runParser Sql.Parser.joinEx "join (bar) b ON b.B = f.F"
+        let expected = [Join((None, Inner), (Ref ["bar"], Some "b"), BinEx(Eq, Ref["b";"B"], Ref["f";"F"]))]
+        actual = expected
 
     let ``select from``() =
-        Sql.Parser.parse "SELECT * FROM foo"
+        let actual = Sql.Parser.parse "SELECT * FROM foo"
+        let expected = { Projection = [Projection(Ref ["*"], None)];
+                         From = [From(Ref ["foo"], None)];
+                         Join = []
+                         Filters = None; Order = None; GroupBy = None } |> QueryEx
+        actual = expected
 
     let ``select with alias``() =
-        Sql.Parser.parse "SELECT * FROM foo f"
+        let actual = Sql.Parser.parse "SELECT * FROM foo f"
+        let expected = { Projection = [Projection(Ref ["*"], None)];
+                         From = [From(Ref ["foo"], Some "f")];
+                         Join = []
+                         Filters = None; Order = None; GroupBy = None } |> QueryEx
+        actual = expected
+
 
     let ``select with alias using as``() =
-        Sql.Parser.parse "SELECT * FROM foo as f"
-        
+        let actual = Sql.Parser.parse "SELECT * FROM foo as f"
+        let expected = { Projection = [Projection(Ref ["*"], None)];
+                         From = [From(Ref ["foo"], Some "f")];
+                         Join = []
+                         Filters = None; Order = None; GroupBy = None } |> QueryEx
+        actual = expected
+
     let ``select with projection``() =
-        Sql.Parser.parse "SELECT t FROM foo f"
+        let actual = Sql.Parser.parse "SELECT t FROM foo f"
+        let expected = { Projection = [Projection(Ref ["t"], None)];
+                         From = [From(Ref ["foo"], Some "f")];
+                         Join = []
+                         Filters = None; Order = None; GroupBy = None } |> QueryEx
+        actual = expected
 
     let ``select with multipart reference projection``() =
-        Sql.Parser.parse "SELECT t.A FROM foo f"
+        let actual = Sql.Parser.parse "SELECT t.A FROM foo f"
+        let expected = { Projection = [Projection(Ref ["t";"A"], None)];
+                         From = [From(Ref ["foo"], Some "f")];
+                         Join = []
+                         Filters = None; Order = None; GroupBy = None } |> QueryEx
+        actual = expected
 
+        
     let ``select in brackets``() =
-        Sql.Parser.parse "SELECT * FROM (foo f)"
-   
+        let actual = Sql.Parser.parse "SELECT * FROM (foo f)"
+        let expected = { Projection = [Projection(Ref ["*"], None)];
+                         From = [From(Ref ["foo"], Some "f")];
+                         Join = []
+                         Filters = None; Order = None; GroupBy = None } |> QueryEx
+        actual = expected
+       
+           
     let ``select with expression``() =
-        Sql.Parser.parse "SELECT 1 * 2 FROM foo"
-
+        let actual = Sql.Parser.parse "SELECT 1 * 2 FROM foo"
+        let expected = { Projection = [Projection(BinEx(Mul, Value(Integer 1), Value(Integer 2)), None)];
+                         From = [From(Ref ["foo"], None)];
+                         Join = []
+                         Filters = None; Order = None; GroupBy = None } |> QueryEx
+        actual = expected
+        
     let ``select with complex expression``() =
-        Sql.Parser.parse "SELECT ((1 * (2 + f.F) % 2) = 0) FROM foo f"
+        let actual = Sql.Parser.parse "SELECT ((1 * (2 + f.F) % 2) = 0) FROM foo f"
+        let expected = { Projection = [
+                                       Projection(BinEx(Eq,
+                                                    BinEx(Mod,
+                                                      BinEx(Mul, Value(Integer 1), BinEx(Add, Value(Integer 2), Ref ["f";"F"])),
+                                                           Value(Integer 2)), Value(Integer 0)), None)];
+                        From = [From(Ref ["foo"], Some "f")];
+                        Join = [];
+                        Filters = None; Order = None; GroupBy = None } |> QueryEx
+        actual = expected
 
     let ``select from where``() =
-        Sql.Parser.parse "SELECT * FROM foo WHERE f.Value = 2"
+        let actual = Sql.Parser.parse "SELECT * FROM foo WHERE f.Value = 2"
+        let expected = { Projection = [Projection(Ref ["*"], None)];
+                         From = [From(Ref ["foo"], None)]
+                         Join = []; Order = None; GroupBy = None
+                         Filters = Some(BinEx(Eq, Ref ["f"; "Value"], Value(Integer 2))) } |> QueryEx
+        actual = expected
+                         
 
     let ``select from join``() =
         Sql.Parser.parse """SELECT * FROM foo f INNER JOIN bar as b ON (b.B = f.F)"""
@@ -147,3 +217,65 @@ module ParserTests =
 
     let ``example file``() =
         Sql.Parser.parse (System.IO.File.ReadAllText("examples/subquery.sql"))
+
+module Runner =
+
+    open FSharp.Reflection
+    open System.Reflection
+
+    type TestResult =
+        | Success of string
+        | Failure of string
+        | Errored of exn
+
+    type RunResult = {
+         Failed : int
+         Passed : int
+         Errored : int
+         Results : TestResult list
+    }
+    with
+        static member Empty = { Failed = 0; Passed = 0; Errored = 0; Results = [] }
+
+        member x.Failures =
+            x.Results
+            |> List.filter (function | Failure _ -> true | _ -> false)
+
+        member x.Errors =
+            x.Results
+            |> List.filter (function | Errored _ -> true | _ -> false)
+        
+    let run() =
+#if INTERACTIVE
+        fsi.AddPrinter (fun (x:RunResult) -> sprintf "Test Results - Passed: %d, Failed: %d, Errored: %d" x.Passed x.Failed x.Errored)
+#endif
+        let sut = typeof<ParserTests.Test>
+        let moduleType = sut.DeclaringType
+
+        let tests =
+            moduleType.GetMembers()
+            |> Array.choose (function
+                 | :? MethodInfo as mi ->
+                    if (mi.ReturnParameter.ParameterType = typeof<bool>) && (mi.GetParameters() = [||])
+                    then Some mi
+                    else None
+                 | _ -> None)
+            |> List.ofArray
+
+        let runTest state (test:MethodInfo) =
+            try
+               match unbox<bool> (test.Invoke(null, [||])) with
+               | true -> { state with Passed = state.Passed + 1; Results = (Success test.Name) :: state.Results }
+               | false -> { state with Failed = state.Failed + 1; Results = (Failure(test.Name)) :: state.Results }
+            with e ->
+               { state with Errored = state.Errored + 1; Results = (Errored(e)) :: state.Results }
+                   
+        
+        let rec runTests state (tests:MethodInfo list) =
+            match tests with
+            | [] -> state
+            | test :: t -> runTests (runTest state test) t        
+
+        runTests RunResult.Empty tests
+
+        
