@@ -1,12 +1,12 @@
-#load "SqlAnalyzer.fsx"
+#load "TestRunner.fs"
+#load "Sql.fsx"
 
-module ParserTests =
+[<Test.Runner.TestFixture>]
+module SqlParserTests =
 
-    open SqlAnalyzer
-    open SqlAnalyzer.Sql.Ast    
+    open Sql
+    open Sql.Sql.Ast    
     open FParsec
-
-    type Test = class end
     
     let runParser p s =
         match FParsec.CharParsers.run p s with
@@ -218,64 +218,4 @@ module ParserTests =
     let ``example file``() =
         Sql.Parser.parse (System.IO.File.ReadAllText("examples/subquery.sql"))
 
-module Runner =
-
-    open FSharp.Reflection
-    open System.Reflection
-
-    type TestResult =
-        | Success of string
-        | Failure of string
-        | Errored of exn
-
-    type RunResult = {
-         Failed : int
-         Passed : int
-         Errored : int
-         Results : TestResult list
-    }
-    with
-        static member Empty = { Failed = 0; Passed = 0; Errored = 0; Results = [] }
-
-        member x.Failures =
-            x.Results
-            |> List.filter (function | Failure _ -> true | _ -> false)
-
-        member x.Errors =
-            x.Results
-            |> List.filter (function | Errored _ -> true | _ -> false)
-        
-    let run() =
-#if INTERACTIVE
-        fsi.AddPrinter (fun (x:RunResult) -> sprintf "Test Results - Passed: %d, Failed: %d, Errored: %d" x.Passed x.Failed x.Errored)
-#endif
-        let sut = typeof<ParserTests.Test>
-        let moduleType = sut.DeclaringType
-
-        let tests =
-            moduleType.GetMembers()
-            |> Array.choose (function
-                 | :? MethodInfo as mi ->
-                    if (mi.ReturnParameter.ParameterType = typeof<bool>) && (mi.GetParameters() = [||])
-                    then Some mi
-                    else None
-                 | _ -> None)
-            |> List.ofArray
-
-        let runTest state (test:MethodInfo) =
-            try
-               match unbox<bool> (test.Invoke(null, [||])) with
-               | true -> { state with Passed = state.Passed + 1; Results = (Success test.Name) :: state.Results }
-               | false -> { state with Failed = state.Failed + 1; Results = (Failure(test.Name)) :: state.Results }
-            with e ->
-               { state with Errored = state.Errored + 1; Results = (Errored(e)) :: state.Results }
-                   
-        
-        let rec runTests state (tests:MethodInfo list) =
-            match tests with
-            | [] -> state
-            | test :: t -> runTests (runTest state test) t        
-
-        runTests RunResult.Empty tests
-
-        
+Test.Runner.run()

@@ -1,132 +1,138 @@
+#load "TestRunner.fs"
+#load "Ddl.fsx"
 
-        
-        let whereEx =
-            opt <| attempt (spaces .>> (keyword "WHERE") .>> spaces >>. termEx)
+Ddl.Ddl.Parser.parse """
+CREATE OR REPLACE PACKAGE GMS.GMS_AUDIT IS
+/****************************************************************************
+*
+*	Project	:	PowerGen Gas Supply + Trading
+*	Date	:	28/05/97
+*	Source	:	gms_audit.pkg
+*	Author	:	Martin Morris / Steve Atkins
+*	Title	: 	Daily auditing requirements. Definition of procedures
+*			for set up of details for a daily audit report.
+*
+*----------|----------|---------|--------------------------------------------
+* Initials | Date     | Version | Comments
+*----------|----------|---------|--------------------------------------------
+* MM/SA    | 28/05/97 |   1.0   | Initial version
+* MM       | 09/05/05 |   1.1   | Amended for Hedge acct. - added paudit008
+*
+****************************************************************************/
+PROCEDURE paudit001 ( p_audit_type     in varchar2,
+                      p_cont_ref       in varchar2,
+                      p_meter_point_id in number,
+                      p_trad_part_id   in number,
+                      p_new_st_date    in date,
+                      p_new_end_date   in date,
+                      p_lastup_userid  in varchar2,
+                      p_lastup_dt      in date         );
+PROCEDURE paudit002 ( p_audit_type     in varchar2,
+                      p_change_type    in varchar2,
+                      p_cont_ref       in varchar2,
+                      p_meter_point_id in number,
+                      p_trad_part_id   in number,
+                      p_price_type     in varchar2,
+                      p_new_st_date    in date,
+                      p_new_end_date   in date,
+                      p_new_val1       in number,
+                      p_old_val1       in number,
+                      p_lastup_userid  in varchar2,
+                      p_lastup_dt      in date         );
+PROCEDURE paudit003 ( p_audit_type     in varchar2,
+                      p_cont_ref       in varchar2,
+                      p_meter_point_id in number,
+                      p_trad_part_id   in number,
+                      p_trad_part_name in varchar2,
+                      p_new_val1       in number,
+                      p_old_val1       in number,
+                      p_new_text1      in varchar2,
+                      p_old_text1      in varchar2,
+                      p_new_text2      in varchar2,
+                      p_old_text2      in varchar2,
+                      p_new_text3      in varchar2,
+                      p_old_text3      in varchar2,
+                      p_new_text4      in varchar2,
+                      p_old_text4      in varchar2,
+                      p_new_text5      in varchar2,
+                      p_old_text5      in varchar2,
+                      p_new_text6      in varchar2,
+                      p_old_text6      in varchar2,
+                      p_new_text7      in varchar2,
+                      p_old_text7      in varchar2,
+                      p_lastup_userid  in varchar2,
+                      p_lastup_dt      in date         );
+PROCEDURE paudit004 ( p_audit_type     in varchar2,
+                      p_cont_ref       in varchar2,
+                      p_meter_point_id in number,
+                      p_trad_part_id   in number,
+                      p_new_st_date    in date,
+                      p_new_end_date   in date,
+                      p_new_text4      in varchar2,
+                      p_new_text6      in varchar2,
+                      p_lastup_userid  in varchar2,
+                      p_lastup_dt      in date         );
+PROCEDURE paudit005 ( p_audit_type     in varchar2,
+                      p_cont_ref       in varchar2,
+                      p_meter_point_id in number,
+                      p_trad_part_id   in number,
+                      p_new_st_date    in date,
+                      p_new_end_date   in date,
+                      p_new_val1       in number,
+                      p_new_val3       in number,
+                      p_lastup_userid  in varchar2,
+                      p_lastup_dt      in date         );
+PROCEDURE paudit006 ( p_audit_type     in varchar2,
+                      p_change_type    in varchar2,
+                      p_cont_ref       in varchar2,
+                      p_meter_point_id in number,
+                      p_trad_part_id   in number,
+                      p_new_st_date    in date,
+                      p_new_end_date   in date,
+                      p_old_st_date    in date,
+                      p_old_end_date   in date,
+                      p_new_val1       in number,
+                      p_old_val1       in number,
+                      p_new_val2       in number,
+                      p_old_val2       in number,
+                      p_lastup_userid  in varchar2,
+                      p_lastup_dt      in date         );
+PROCEDURE paudit007 ( p_audit_type     in varchar2,
+                      p_change_type    in varchar2,
+                      p_cont_ref       in varchar2,
+                      p_meter_point_id in number,
+                      p_trad_part_id   in number,
+                      p_price_type     in varchar2,
+                      p_new_st_date    in date,
+                      p_new_end_date   in date,
+                      p_new_val1       in number,
+                      p_new_val2       in number,
+                      p_lastup_userid  in varchar2,
+                      p_lastup_dt      in date         );
+PROCEDURE paudit008 ( p_audit_type     in varchar2,
+                      p_change_type    in varchar2,
+                      p_cont_ref       in varchar2,
+                      p_meter_point_id in number,
+                      p_trad_part_id   in number,
+                      p_price_type     in varchar2,
+                      p_new_st_date    in date,
+                      p_new_end_date   in date,
+                      p_new_text1      in varchar2,
+                      p_old_text1      in varchar2,
+                      p_lastup_userid  in varchar2,
+                      p_lastup_dt      in date         );
+PROCEDURE paudit009 ( p_audit_type     in varchar2,
+                      p_change_type    in varchar2,
+                      p_comm_id        in number,
+                      p_trad_part_id   in number,
+                      p_price_type     in varchar2,
+                      p_new_st_date    in date,
+                      p_new_end_date   in date,
+                      p_new_text       in varchar2,
+                      p_old_text       in varchar2,
+                      p_lastup_userid  in varchar2,
+                      p_lastup_dt      in date         );
 
-        let orderEx =
-            let direction = 
-                opt (
-                      ((keyword "ASC") >>% OrderDir.ASC)
-                       <|>
-                      ((keyword "DESC") >>% OrderDir.DESC)
-                )
-            
-            let ids = 
-                (spaces >>. (identifier .>>. attempt (spaces >>. direction .>> spaces)))
-
-            attempt (spaces .>> keyword "ORDER BY" >>. (sepBy ids (pstring ",")) .>> spaces)
-            |>> List.map OrderEx.Order
-
-        let joinEx =
-            let joinDir =
-                spaces
-                >>. (attempt (opt
-                        (choice [
-                                    keyword "LEFT" >>% JoinDir.Left
-                                    keyword "RIGHT" >>% JoinDir.Right
-                                ])))
-                .>> spaces
-            
-            let joinType =
-                spaces >>. choice [
-                        keyword "JOIN" >>% JoinType.Inner
-                        keyword "INNER JOIN" >>% JoinType.Inner
-                        keyword "OUTER JOIN" >>% JoinType.Outer
-                        keyword "FULL JOIN" >>% JoinType.Full
-                        keyword "CROSS JOIN" >>% JoinType.Cross
-                ] .>> spaces
-
-            let joinClass =
-                spaces >>. (joinDir .>>. joinType) .>> spaces
-            
-            let join =
-                (joinClass .>>. referenceEx .>> spaces .>> keyword "ON" .>> spaces .>>. termEx .>> spaces)
-                |>> (fun ((x,y),z) -> Join(x,y,z))
-        
-            attempt (manyTill join (notFollowedBy joinClass)) 
-        
-        let selectEx = 
-            let projection = 
-                termEx .>> spaces .>>. (opt (attempt alias))
-
-            let fromEx =
-                let nestedQuery =
-                    between (str_ws "(") (str_ws ")") sqlParser |>> QueryEx
-                    .>> spaces
-                    .>>. (opt (attempt alias)) |>> From
-
-                let internalFrom =
-                    nestedQuery |>> List.singleton
-                    <|>
-                    (sepBy (reference .>>. (opt (attempt alias)) |>> From) (pstring ","))
-                
-                spaces >>. 
-                keyword "FROM" >>. 
-                spaces >>.
-                internalFrom   
-
-            
-            spaces >>. 
-            keyword "SELECT" >>. opt (skipStringCI "DISTINCT") >>. 
-            spaces >>. 
-            sepBy (projection |>> Projection) (pstring ",") .>>
-            spaces .>>.
-            fromEx
-                    
-        do sqlParserRef :=
-            parse {
-                do! spaces
-                let! (projection, from) =  selectEx
-                do! spaces
-                let! join = joinEx
-                do! spaces 
-                let! where = whereEx
-                do! spaces
-                let! order = orderEx
-                do! spaces
-                return { Projection = projection; 
-                         From = from; 
-                         Filters = where; 
-                         Join = join; 
-                         Order = order }
-            }
-
-
-let testSelect = 
-    FParsec.CharParsers.run Sql.Parser.selectEx "SELECT (3 + 2) * 6 as 'Value', tbl1.ID ID FROM dbo.Table1 tbl1"
-
-
-let testSelectNested = 
-    FParsec.CharParsers.run Sql.Parser.selectEx """
-        SELECT (3 + 2) * 6 as 'Value', tbl1.ID ID
-        FROM (SELECT quux FROM dbo.Table3)
-    """
-
-
-let testWhere = 
-    FParsec.CharParsers.run Sql.Parser.whereEx "WHERE ((Value = 36) AND (ID > 2)) OR (x + 1 > 3)"
-
-let testOrderby = 
-    FParsec.CharParsers.run Sql.Parser.orderEx "ORDER BY Value ASC, ID DESC"
-
-let both = 
-    let p = 
-        parse { 
-            let! where = Sql.Parser.whereEx
-            do! spaces
-            let! order = Sql.Parser.orderEx
-            return (where, order)
-        }
-    FParsec.CharParsers.run p """
-    WHERE ((Value = 36) AND (ID > 2)) OR ((x + 1) > 3)
-    ORDER BY Value ASC, ID DESC"""
-
-let test = """
-SELECT (3 + 2) * 6 as 'Value', tbl1.ID ID
-FROM (SELECT quux FROM dbo.Table3)
-JOIN dbo.Table2 tbl2 ON Value = f.Value AND tbl2.Key = N'MyKey'
-RIGHT OUTER JOIN [dbo].[Table3] tbl3 on tbl2.Value = tbl3.NotionalAmount
-LEFT OUTER JOIN dbo.Table4 tbl4 on tbl1.Value = tbl4.NotionalAmount
-WHERE ((Value = 36) AND (ID > 2)) OR ((x + 1) > 3)
-ORDER BY Value ASC"""
-
+END gms_audit;
+/
+"""
